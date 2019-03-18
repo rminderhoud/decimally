@@ -1,0 +1,7 @@
+[package]
+name = "decimally-core"
+version = "0.0.1"
+authors = ["Ralph Minderhoud <mail@ralphminderhoud.com>"]
+edition = "2018"
+
+[dependencies]
