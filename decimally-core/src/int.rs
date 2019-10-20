@@ -1,4 +1,4 @@
-use core::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use core::ops::{Add, Div, Mul, Neg, Rem, Shl, Shr, Sub};
 
 pub trait Integer<Rhs = Self, Output = Self>:
     Sized
@@ -11,6 +11,8 @@ pub trait Integer<Rhs = Self, Output = Self>:
     + Mul<Rhs, Output = Output>
     + Div<Rhs, Output = Output>
     + Rem<Rhs, Output = Output>
+    + Shr<Rhs, Output = Output>
+    + Shl<Rhs, Output = Output>
 {
 }
 

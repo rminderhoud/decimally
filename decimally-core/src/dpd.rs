@@ -1,21 +1,45 @@
-/// Unpack digits from a dpd coeffecient by declet (group of 10 bits)
-/// TODO: Make this generic over u32, u64 and u128 for NUM and RETURN
+//! Densely Packed Decimal Encoding
+
+/// Unpack digits from a 32-bit dpd by declet (group of 10 bits)
 pub fn digits_from_dpd(num: u32, declets: u32) -> u32 {
     let mut output = 0;
 
     // Iterate declets from the right
     for offset in (0..10 * declets).step_by(10) {
         let mut dpd = num >> offset;
-        dpd = dpd & 0x3ff; // Reset uneeded bits
+        dpd &= 0x3ff; // Reset uneeded bits
 
-        if dpd == 0 {
-            return 0;
-        }
-
-        output = output | (DPD2BIN[dpd as usize] << offset) as u32
+        let digit = DPD2BIN[dpd as usize];
+        output |= u32::from(digit) << offset
     }
 
     output
+}
+
+/// Unpack digits from a 64-bit dpd by declet (group of 10 bits)
+pub fn digits_from_dpd64(num: u64, declets: u32) -> u64 {
+    if declets <= 3 {
+        u64::from(digits_from_dpd(num as u32, declets))
+    } else {
+        // Process first 3 declets (30 bits) and then remaining decleys (upto 34-bits)
+        let lo = digits_from_dpd(num as u32, 3);
+        let hi = digits_from_dpd((num >> 30) as u32, declets - 3);
+
+        u64::from(hi) << 30 | u64::from(lo)
+    }
+}
+
+/// Unpack digits from a 128-bit dpd by declet (group of 10 bits)
+pub fn digits_from_dpd128(num: u128, declets: u32) -> u128 {
+    if declets <= 6 {
+        u128::from(digits_from_dpd64(num as u64, declets))
+    } else {
+        // Process first 6 declets (60 bits) then remaining decleys (upto 68 bits)
+        let lo = digits_from_dpd64(num as u64, 6);
+        let hi = digits_from_dpd64((num >> 60) as u64, declets - 3);
+
+        u128::from(hi) << 60 | u128::from(lo)
+    }
 }
 
 #[rustfmt::skip]

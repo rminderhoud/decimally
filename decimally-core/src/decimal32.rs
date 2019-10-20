@@ -1,68 +1,179 @@
+//! A 32-bit floating point decimal using IEEE-754 encoding
 use crate::decimal::Decimal;
 use crate::dpd::digits_from_dpd;
 
 /// Lookup table for converting a 5-bit combination field to the 2 most significant bits of the
 /// exponent
-const COMB_EXP_LOOKUP: [u16; 32] = [
+const COMB_EXP_LOOKUP: [u8; 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 1, 1, 2, 2, 3, 3,
 ];
 
 /// Lookup table for converting a 5-bit combination field to the most significand digit of the
 /// coeffecient in BCD format (4-bits per digit)
-const COMB_DIG_LOOKUP: [u32; 32] = [
+const COMB_DIG_LOOKUP: [u8; 32] = [
     0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 8, 9, 8, 9, 0, 1,
 ];
 
-const COMBINATION_MASK: u32 = 0x1f;
-const EXPONENT_MASK: u32 = 0x3f;
-const COEFFECIENT_MASK: u32 = 0x000fffff;
+const SIGN_MASK: u32 = 0x8000_0000;
+const COMBINATION_MASK: u32 = 0x7c00_0000;
+const EXPONENT_MASK: u32 = 0x03f0_0000;
+const COEFFECIENT_MASK: u32 = 0x000f_ffff;
 
-const BIAS: i16 = 101;
+const PRECISION: usize = 7;
+const EXPONENT_BIAS: i8 = 101;
 
-/// Decimal encoded as a 32-bit unsigned integer
-/// 1 bit sign
-/// 5 bit combination field
-/// 6 bit exponent continuation field
-/// 20 bit coeffecient continuation field
-struct Decimal32 {
-    bytes: u32,
+/// Minimum exponent value
+pub const EXPONENT_MIN: i8 = -95;
+
+/// Maximum exponent value
+pub const EXPONENT_MAX: i8 = 96;
+
+/// Maximum coeffecient (significand) value
+pub const COEFFECIENT_MAX: u32 = 9_999_999; // 10 ^ PRECISION - 1
+
+/// Zero decimal (0E1)
+pub const ZERO: u32 = 0x6000_0000;
+
+// Encodes an exponent's 2 most significant bits and a coeffecient's most significant digit in BCD
+// (4-bit) into a 5-bit combination field
+fn encode_combination_field(exp_msb: u8, coeff_msd: u8) -> u8 {
+    if coeff_msd <= 7 {
+        // TODO: Encode this case
+        // 11 a b c?
+        // 1 0 0 e?
+    } else {
+        // TODO: Encode this case
+        // a b c d e
+    }
+    0
+}
+
+/// A 32-bit floating point decimal using IEEE-754 encoding
+pub struct Decimal32 {
+    pub bits: u32,
+}
+
+impl Decimal32 {
+    /// Gets the 5-bit combination field
+    #[inline]
+    fn combination_field(&self) -> u8 {
+        ((self.bits & COMBINATION_MASK) >> 26) as u8
+    }
+
+    /// Sets the 5-bit combination field
+    #[inline]
+    fn set_combination_field(&mut self, comb: u8) {
+        self.bits &= !COMBINATION_MASK;
+        self.bits |= (u32::from(comb)) << 26;
+    }
+
+    /// Gets the 2-bit exponent MSB from the combination field using a lookup table
+    #[inline]
+    fn exponent_msb(&self) -> u8 {
+        COMB_EXP_LOOKUP[self.combination_field() as usize]
+    }
+
+    /// Gets the 6-bit exponent continuation
+    #[inline]
+    fn exponent_cont(&self) -> u8 {
+        ((self.bits & EXPONENT_MASK) >> 20) as u8
+    }
+
+    /// Sets the 6-bit exponent continutation
+    #[inline]
+    fn set_exponent_cont(&mut self, cont: u8) {
+        self.bits &= !EXPONENT_MASK;
+        self.bits |= (u32::from(cont)) << 20;
+    }
+
+    /// Gets the 4-bit (BCD) coeffecient MSB from the combination field using a lookup table
+    #[inline]
+    fn coeffecient_msd(&self) -> u8 {
+        COMB_DIG_LOOKUP[self.combination_field() as usize]
+    }
+
+    /// Gets the 20-bit (DPD encoded) coeffecient continuaton
+    #[inline]
+    fn coeffecient_cont(&self) -> u32 {
+        self.bits & COEFFECIENT_MASK
+    }
+
+    /// Sets the 20-bit (DPD encoded) coeffecient continuation
+    #[inline]
+    fn set_coeffecient_cont(&mut self, cont: u32) {
+        self.bits &= !COEFFECIENT_MASK;
+        self.bits |= cont;
+    }
 }
 
 impl Decimal for Decimal32 {
     type Coeffecient = u32;
-    type Exponent = i16;
+    type Exponent = i8;
+
+    fn new() -> Decimal32 {
+        Decimal32 { bits: ZERO }
+    }
 
     fn sign(&self) -> bool {
-        (self.bytes >> 31) == 1
+        (self.bits >> 31) > 0
+    }
+
+    fn set_sign(&mut self, sign: bool) {
+        let sign: u32 = if sign { 1 } else { 0 };
+        self.bits &= !SIGN_MASK;
+        self.bits |= sign << 31;
     }
 
     fn exponent(&self) -> Self::Exponent {
-        // 5-bit combination field
-        let combination_field = (self.bytes >> 26) & COMBINATION_MASK;
+        // Get exponent parts (2-bit msb & 6-bit continuation)
+        let exp_msb = self.exponent_msb();
+        let exp_cont = self.exponent_cont();
 
-        // 2-bit exponent MSB from the combination field using lookup table
-        let exp_msb = COMB_EXP_LOOKUP[combination_field as usize];
+        // Encoded exponent as u8 with bias
+        let encoded_exp = (exp_msb << 6) + (exp_cont as u8);
 
-        // 6-bit exponent continuation
-        let exp_cont = (self.bytes >> 20) & EXPONENT_MASK;
+        // Adjust encoded exponent with bias
+        // Note: Uses intermediate i16 to prevent u8 underflow
+        let exp = i16::from(encoded_exp) - i16::from(EXPONENT_BIAS);
 
-        // Exponent
-        ((exp_msb << 6) + (exp_cont as u16)) as i16 - BIAS
+        exp as i8
+    }
+
+    fn set_exponent(&mut self, exp: Self::Exponent) -> Result<(), &str> {
+        if exp > EXPONENT_MAX {
+            // TODO: Return real error
+            return Err("");
+        }
+
+        if exp < EXPONENT_MIN {
+            // TODO: Return real error
+            return Err("");
+        }
+
+        // Add the exponent bias
+        // Note: Uses intermediate i16 to preven u8 underflow
+        let exp = (i16::from(exp) + i16::from(EXPONENT_BIAS)) as u8;
+
+        // Set new exponent msb in combination field
+        let exp_msb = exp >> 6;
+        let coeff_msd = self.coeffecient_msd() as u8;
+        let combination_field = encode_combination_field(exp_msb, coeff_msd);
+        self.set_combination_field(combination_field);
+
+        // Set new exponent continuation bits
+        let exp_cont = exp & 0x6f;
+        self.set_exponent_cont(exp_cont);
+
+        Ok(())
     }
 
     fn coeffecient(&self) -> Self::Coeffecient {
-        // 5-bit combination field
-        let combination_field = (self.bytes >> 26) & COMBINATION_MASK;
-
-        // 3-bit MSD (digit) from the combination field using lookup table
-        let coeff_msd = COMB_DIG_LOOKUP[combination_field as usize];
-
-        // 20-bit coeffecient continuation
-        let coeff_cont = self.bytes & COEFFECIENT_MASK;
+        let coeff_msd = self.coeffecient_msd();
+        let coeff_cont = self.coeffecient_cont();
 
         // Unpack coeffecient digits from DPD
         if coeff_msd > 0 {
-            let coeff = (coeff_msd << 20) | coeff_cont;
+            let coeff = (u32::from(coeff_msd) << 20) | coeff_cont;
             return digits_from_dpd(coeff, 3);
         }
 
@@ -70,11 +181,33 @@ impl Decimal for Decimal32 {
             return 0;
         }
 
-        if coeff_cont == 0x000ffc00 {
+        if coeff_cont == 0x000f_fc00 {
             return digits_from_dpd(coeff_cont, 2);
         }
 
-        return digits_from_dpd(coeff_cont, 1);
+        digits_from_dpd(coeff_cont, 1)
+    }
+
+    fn set_coeffecient(&mut self, coeff: Self::Coeffecient) -> Result<(), &str> {
+        // TODO:
+        // - Check max coeffecient (7 digits - 9,999,999 | 10 ^ (precision + 1) - 1
+        // - Encode coeffecient into dpd
+        // - Get MSD + EXP MSB
+        // - Set MSD into combo field
+        // - Set coeffecient cont
+        Ok(())
+    }
+
+    fn from_u8(num: u8) -> Self {
+        let mut d = Self::new();
+        // TODO: If fails, should I create MAX or SPECIAL?
+        d.set_coeffecient(u32::from(num));
+        d
+    }
+
+    fn from_u8_checked(num: u8) -> Option<Self> {
+        // TODO: Handle error
+        Some(Self::from_u8(num))
     }
 }
 
@@ -84,17 +217,31 @@ mod tests {
 
     #[test]
     fn test_decimal32_sign() {
-        let pos = Decimal32 { bytes: 0x8000_0000 };
-        let neg = Decimal32 { bytes: 0x0000_0000 };
+        let pos = Decimal32 { bits: 0x0000_0000 };
+        assert_eq!(pos.sign(), false);
+        assert_eq!(pos.is_sign_positive(), true);
+        assert_eq!(pos.is_sign_negative(), false);
 
-        assert_eq!(pos.sign(), true);
-        assert_eq!(neg.sign(), false);
+        let neg = Decimal32 { bits: 0x8000_0000 };
+        assert_eq!(neg.sign(), true);
+        assert_eq!(neg.is_sign_positive(), false);
+        assert_eq!(neg.is_sign_negative(), true);
+
+        for dec in &mut [pos, neg] {
+            for signed in &[false, true, false, true] {
+                let signed = *signed;
+                dec.set_sign(signed);
+                assert_eq!(dec.sign(), signed);
+                assert_eq!(dec.is_sign_positive(), !signed);
+                assert_eq!(dec.is_sign_negative(), signed);
+            }
+        }
     }
 
     #[test]
     fn test_decimal32_exponent() {
-        let pos_exp = Decimal32 { bytes: 0xA260_03D0 };
-        let neg_exp = Decimal32 { bytes: 0xA230_03D0 };
+        let pos_exp = Decimal32 { bits: 0xA260_03D0 };
+        let neg_exp = Decimal32 { bits: 0xA230_03D0 };
 
         assert_eq!(pos_exp.exponent(), 1);
         assert_eq!(neg_exp.exponent(), -2);
@@ -102,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_decimal32_coeffecient() {
-        let d = Decimal32 { bytes: 0xA260_03D0 };
+        let d = Decimal32 { bits: 0xA260_03D0 };
         assert_eq!(d.coeffecient(), 750);
     }
 }
