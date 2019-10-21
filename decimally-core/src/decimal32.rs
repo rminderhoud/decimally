@@ -1,6 +1,7 @@
 //! A 32-bit floating point decimal using IEEE-754 encoding
 use crate::decimal::Decimal;
 use crate::dpd::digits_from_dpd;
+use crate::error::DecimalStorageError;
 
 /// Lookup table for converting a 5-bit combination field to the 2 most significant bits of the
 /// exponent
@@ -37,15 +38,13 @@ pub const ZERO: u32 = 0x6000_0000;
 // Encodes an exponent's 2 most significant bits and a coeffecient's most significant digit in BCD
 // (4-bit) into a 5-bit combination field
 fn encode_combination_field(exp_msb: u8, coeff_msd: u8) -> u8 {
+    let mut comb: u8 = 0;
     if coeff_msd <= 7 {
-        // TODO: Encode this case
-        // 11 a b c?
-        // 1 0 0 e?
+        comb |= (exp_msb << 3) | (coeff_msd & 0x7);
     } else {
-        // TODO: Encode this case
-        // a b c d e
+        comb |= 0x18 | (exp_msb << 1) | (coeff_msd & 0x1);
     }
-    0
+    comb
 }
 
 /// A 32-bit floating point decimal using IEEE-754 encoding
@@ -129,7 +128,7 @@ impl Decimal for Decimal32 {
         let exp_msb = self.exponent_msb();
         let exp_cont = self.exponent_cont();
 
-        // Encoded exponent as u8 with bias
+        // Encoded exponent as u8
         let encoded_exp = (exp_msb << 6) + (exp_cont as u8);
 
         // Adjust encoded exponent with bias
@@ -139,19 +138,17 @@ impl Decimal for Decimal32 {
         exp as i8
     }
 
-    fn set_exponent(&mut self, exp: Self::Exponent) -> Result<(), &str> {
+    fn set_exponent(&mut self, exp: Self::Exponent) -> Result<(), DecimalStorageError> {
         if exp > EXPONENT_MAX {
-            // TODO: Return real error
-            return Err("");
+            return Err(DecimalStorageError::ExponentTooLarge);
         }
 
         if exp < EXPONENT_MIN {
-            // TODO: Return real error
-            return Err("");
+            return Err(DecimalStorageError::ExponentTooSmall);
         }
 
         // Add the exponent bias
-        // Note: Uses intermediate i16 to preven u8 underflow
+        // Note: Uses intermediate i16 to prevent u8 underflow
         let exp = (i16::from(exp) + i16::from(EXPONENT_BIAS)) as u8;
 
         // Set new exponent msb in combination field
@@ -188,25 +185,48 @@ impl Decimal for Decimal32 {
         digits_from_dpd(coeff_cont, 1)
     }
 
-    fn set_coeffecient(&mut self, coeff: Self::Coeffecient) -> Result<(), &str> {
+    fn set_coeffecient(&mut self, coeff: Self::Coeffecient) -> Result<(), DecimalStorageError> {
+        if coeff > COEFFECIENT_MAX {
+            return Err(DecimalStorageError::CoeffecientTooLarge);
+        }
+
         // TODO:
-        // - Check max coeffecient (7 digits - 9,999,999 | 10 ^ (precision + 1) - 1
         // - Encode coeffecient into dpd
         // - Get MSD + EXP MSB
         // - Set MSD into combo field
         // - Set coeffecient cont
+
         Ok(())
     }
 
     fn from_u8(num: u8) -> Self {
         let mut d = Self::new();
-        // TODO: If fails, should I create MAX or SPECIAL?
-        d.set_coeffecient(u32::from(num));
+        d.set_coeffecient(u32::from(num)).unwrap();
+        d
+    }
+
+    fn from_u16(num: u16) -> Self {
+        let mut d = Self::new();
+        d.set_coeffecient(u32::from(num)).unwrap();
+        d
+    }
+
+    fn from_u32(num: u32) -> Self {
+        let mut d = Self::new();
+        // TODO: How to handle error, clamp or infinity
+        // Spec seems to indicate that the number should be rounded based on user preference
+        // So 4,294,967,295 would need to be truncated to 7 digits by rounding to 4,294,967,000
+        // using the specified rounding system and then representing with different exponent
+        // Question that is raised: Should this be handled implicity or provided to function
+        // by function just like every operation?
+        // Answer, should use context precision UNLESS it's greater than implementation precision,
+        // then use implementation precision
+
+        d.set_coeffecient(u32::from(num)).unwrap();
         d
     }
 
     fn from_u8_checked(num: u8) -> Option<Self> {
-        // TODO: Handle error
         Some(Self::from_u8(num))
     }
 }
@@ -245,11 +265,29 @@ mod tests {
 
         assert_eq!(pos_exp.exponent(), 1);
         assert_eq!(neg_exp.exponent(), -2);
+
+        let mut dec = Decimal32::new();
+        assert_eq!(dec.set_exponent(EXPONENT_MIN - 1).is_err(), true);
+        assert_eq!(dec.set_exponent(EXPONENT_MAX + 1).is_err(), true);
+
+        for exp in &[EXPONENT_MIN, -5, 0, 5, EXPONENT_MAX] {
+            let exp = *exp;
+            dec.set_exponent(exp).unwrap();
+            assert_eq!(exp, dec.exponent());
+        }
     }
 
     #[test]
     fn test_decimal32_coeffecient() {
-        let d = Decimal32 { bits: 0xA260_03D0 };
-        assert_eq!(d.coeffecient(), 750);
+        let mut dec = Decimal32 { bits: 0xA260_03D0 };
+        assert_eq!(dec.coeffecient(), 750);
+
+        assert_eq!(dec.set_coeffecient(COEFFECIENT_MAX + 1).is_err(), true);
+
+        for coeff in &[0, 5, 999, 99999, COEFFECIENT_MAX] {
+            let coeff = *coeff;
+            dec.set_coeffecient(coeff).unwrap();
+            assert_eq!(coeff, dec.coeffecient());
+        }
     }
 }

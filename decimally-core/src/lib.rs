@@ -4,4 +4,5 @@ pub mod decimal;
 pub mod decimal32;
 
 mod dpd;
+mod error;
 mod int;

@@ -1,3 +1,4 @@
+use crate::error::DecimalStorageError;
 use crate::int::{SignedInteger, UnsignedInteger};
 
 pub trait Decimal: Sized {
@@ -17,13 +18,13 @@ pub trait Decimal: Sized {
     fn exponent(&self) -> Self::Exponent;
 
     /// Set the decimal exponent
-    fn set_exponent(&mut self, exp: Self::Exponent) -> Result<(), &str>;
+    fn set_exponent(&mut self, exp: Self::Exponent) -> Result<(), DecimalStorageError>;
 
     /// Get the decimal coeffecient (significand)
     fn coeffecient(&self) -> Self::Coeffecient;
 
     /// Set the decimal coeffecient (signficand)
-    fn set_coeffecient(&mut self, coeff: Self::Coeffecient) -> Result<(), &str>;
+    fn set_coeffecient(&mut self, coeff: Self::Coeffecient) -> Result<(), DecimalStorageError>;
 
     /*
     fn to_scientific_string() {}
@@ -54,13 +55,13 @@ pub trait Decimal: Sized {
     /// Create decimal from `u8` with potential precision loss
     fn from_u8(num: u8) -> Self;
 
+    /// Create decimal from `u16` with potential precision loss
+    fn from_u16(num: u16) -> Self;
+
+    /// Create decimal from `u32` with potential precision loss
+    fn from_u32(num: u32) -> Self;
+
     /*
-        /// Create decimal from `u16` with potential precision loss
-        fn from_u16(num: u16) -> Self;
-
-        /// Create decimal from `u32` with potential precision loss
-        fn from_u32(num: u32) -> Self;
-
         /// Create decimal from `u64` with potential precision loss
         fn from_u64(num: u64) -> Self;
 
